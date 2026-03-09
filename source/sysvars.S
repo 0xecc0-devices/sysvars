@@ -1,6 +1,6 @@
 ************************************************************
 *                                                          *
-*                      SYSVARS V.0.17                      *
+*                      SYSVARS V.0.18                      *
 *                                                          *
 * SPDX-FileCopyrightText: (c) 2023-2025 Lars Stockmann     *
 * SPDX-License-Identifier: MIT                             *
@@ -13,7 +13,7 @@
 ************************************************************
 
 PROGVER: macro
-    dc.b "$VER: SYSVARS 0.17",0
+    dc.b "$VER: SYSVARS 0.18",0
     endm
 
 ******************** Feature Selection *********************
@@ -101,6 +101,20 @@ E_\1 = 1
 FALSE =  0
 TRUE  = -1
 
+; cache control enable data cache (68030)
+CACRB_ED EQU 8
+CACRF_ED EQU 1<<8
+
+; cache control no allocate mode (68060)
+CACRB_NAI EQU 14
+CACRF_NAI EQU 1<<14
+
+ ; cache control instruction cache enable (68040+)
+CACRB_IE EQU 15
+CACRF_IE EQU 1<<15
+
+AC68080_ID EQU $0440
+
 ; Exec Constants and _LVOs
 
 EXEC_BASE      =  4
@@ -108,6 +122,7 @@ EXEC_Node_SIZE = 14
 EXEC_LIB_HDR_S = EXEC_Node_SIZE+20
 EXEC_O_LIB_VER = EXEC_Node_SIZE+6
 
+_LVOSupervisor = -30
 _LVOOpenLibrary  = -552
 _LVOCloseLibrary = -414
 
@@ -462,35 +477,84 @@ setCPUAndFPUEnvVars:
 
 ; D4 gets the CPU version as ASCII character that replaces
 ; the "?" in "680?0"
-    moveq #"8",d4    ; assume 68080
-    btst  #10,d5
-    bne.b .storeCPU
-    moveq #"6",d4    ; assume 68060
-    btst  #7,d5
-    bne.b .storeCPU
-    moveq #"4",d4    ; assume 68040
-    btst  #3,d5
-    bne.b .storeCPU
-    moveq #"3",d4    ; assume 68030
-    btst  #2,d5
-    bne.b .storeCPU
-    moveq #"2",d4    ; assume 68020
-    btst  #1,d5
-    bne.b .storeCPU
-    moveq #"1",d4    ; assume 68010
-    btst  #0,d5
-    bne.b .storeCPU
-    moveq #"0",d4    ; it must be 68000    
-    
+
+; Based on code by
+
+; Chris Hooper: detecting MC680x0 cpus by cleverly
+; exploiting their CACR and PCR capabilities
+; https://github.com/cdhooper/amigapci_stm32/blob/main/amiga/cpu_control.c
+
+; Photon: call a function in supervisor mode and use
+; dc.w to allow compiling with 68000 function set
+; http://coppershade.org/asmskool/PhotonsMiniStartup/PhotonsMiniWrapper1.04!.S
+
+; Markus Wandel: providing Kickstart 1.2 disassembly to ensure
+; that - and how - MC68010 and MC68020 detection is done
+; https://wandel.ca/homepage/execdis/exec_disassembly.txt
+
+; Apollo AC68080 PROGRAMMER'S REFERENCE MANUAL
+; telling the MC68060 and AC68080 apart by its PCR ID value
+; http://www.apollo-core.com/documentation/AC68080PRM.pdf
+
+    moveq #"0",d4           ; assume 68000
+    btst #0,d5              ; test for 68010+
+    beq.s .storeCPU         ; it's 68000
+    moveq #"1",d4           ; assume 68010
+    btst #1,d5              ; test for 68020+
+    beq.s .storeCPU         ; it's 68010
+    moveq #"2",d4           ; assume 68020
+    move.l #CACRF_IE,d1     ; CACR value to enable 68040+
+                            ; instruction cache
+    lea .writeCACR(pc),a5   ; fetch pointer to function
+    jsr _LVOSupervisor(a0)  ; execute function in supervisor
+                            ; mode
+    btst #CACRB_IE,d1       ; test for 68040
+    bne.s .is040
+    move.l #CACRF_ED,d1     ; CACR value to enable 68030
+                            ; data cache
+    jsr _LVOSupervisor(a0)  ; execute function in
+                            ; supervisor mode
+    btst #CACRB_ED,d1
+    beq.s .storeCPU         ; it's 68020
+    moveq #"3",d4
+    bra.s .storeCPU         ; it's 68030
+.is040:
+    moveq #"4",d4           ; assume 68040
+    move.l #CACRF_NAI,d1    ; CACR value to enable 68060
+                            ; no allocation mode
+    jsr _LVOSupervisor(a0)  ; execute function in
+                            ; supervisor mode
+    btst #CACRB_NAI,d1
+    beq.s .storeCPU         ; it's 68040
+    moveq #"6",d4           ; assume 68060
+    lea .readPCR(pc),a5     ; fetch pointer to function
+    jsr _LVOSupervisor(a0)  ; execute function in
+                            ; supervisor mode
+    swap d1
+    and.l #$0000FFF0,d1
+    cmp.w #AC68080_ID,d1
+    bne.s .storeCPU         ; it's 68060
+    moveq #"8",d4           ; it's 68080
+
 .storeCPU:
     move.b  d4,CPUStr+3            ; digit at position 3
     SET_ENV_VAR_CLEN CPU,#CPUStr,5
-
 
 ; Only consider checking FPU if CPU > 68010
     cmpi.b  #'1',d4 ; Check for 68010
     bhi .mayHaveFPU    
     rts
+
+.writeCACR:
+    dc.w $4e7a,$0002  ; hex for 'movec.l cacr, d0' ; save cacr
+    dc.w $4e7b,$1002  ; hex for 'movec.l d1, cacr' ; write cacr
+    dc.w $4e7a,$1002  ; hex for 'movec.l cacr, d1' ; read cacr back
+    dc.w $4e7b,$0002  ; hex for 'movec.l d0, cacr' ; restore cacr
+    rte
+
+.readPCR:
+    dc.w $4e7a,$1808  ; hex for 'movec.l pcr, d1 ; read pcr
+    rte
 
 .mayHaveFPU:
 ; We lshift D0 by 1 (via add.b D5,D5) until it is negative
