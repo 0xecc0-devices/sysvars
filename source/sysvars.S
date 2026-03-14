@@ -101,6 +101,33 @@ E_\1 = 1
 FALSE =  0
 TRUE  = -1
 
+; exception vectors
+IllegalInstructionVector    EQU $10
+Line1111EmulatorVector      EQU $2c
+
+CPU_68000   EQU 0
+CPU_68010   EQU 1
+CPU_68EC020 EQU 2
+CPU_68020   EQU 3
+CPU_68EC030 EQU 4
+CPU_68030   EQU 5
+CPU_68EC040 EQU 6
+CPU_68LC040 EQU 7
+CPU_68040   EQU 8
+CPU_68EC060 EQU 9
+CPU_68LC060 EQU 10
+CPU_68060   EQU 11
+CPU_68080   EQU 12
+
+FPU_NONE    EQU 0
+FPU_68881   EQU 1
+FPU_68882   EQU 2
+FPU_INT     EQU 3
+
+; processor configuration register disable floating-point unit (68060)
+PCRB_DPF EQU 1
+PCRF_DPF EQU 1<<1
+
 ; cache control enable data cache (68030)
 CACRB_ED EQU 8
 CACRF_ED EQU 1<<8
@@ -109,7 +136,7 @@ CACRF_ED EQU 1<<8
 CACRB_NAI EQU 14
 CACRF_NAI EQU 1<<14
 
- ; cache control instruction cache enable (68040+)
+; cache control instruction cache enable (68040+)
 CACRB_IE EQU 15
 CACRF_IE EQU 1<<15
 
@@ -471,15 +498,66 @@ _LVOSoftVer   = $14
 ;-----------------------------------------------------------
 setCPUAndFPUEnvVars:
 
-; Test bits of second AttnFlags byte
     movea.l EXEC_BASE,a0          ; get exec base in A0
-    move.w  _LVOAttnFlags(a0),d5  ; get cpu info in D5
 
-; D4 gets the CPU version as ASCII character that replaces
+    lea .detectCPU(pc),a5   ; fetch pointer to function
+    jsr _LVOSupervisor(a0)  ; execute function in supervisor
+                            ; mode
+
+    move.l  d0,d7           ; store cpu model for later
+
+; D0 gets the CPU version as ASCII character that replaces
 ; the "?" in "680?0"
+    lea     .cpuDigit,a0
+    move.b  (a0,d0),d0
+    addi.l  #$30,d0         ; convert to ascii
+    move.b  d0,CPUStr+3     ; digit at position 3
+    SET_ENV_VAR_CLEN CPU,#CPUStr,5
 
+    movea.l EXEC_BASE,a0    ; get exec base in A0
+    move.l  d7,d1           ; recall cpu model
+    lea .detectFPU(pc),a5
+    jsr _LVOSupervisor(a0)
+
+; D0 gets the FPU version as ASCII character that replaces
+; the "?" in "6888?" or the whole string gets mangled
+    lea     FPUStr,a0
+    cmp.l   #FPU_NONE,d0
+    beq.s   .fpuNone
+    cmp.l   #FPU_INT,d0
+    beq.s   .fpuInternal
+    add.l   #$30,d0         ; convert to ascii
+
+.fpu68882:
+.fpu68881:
+    move.b  d0,4(a0)
+    moveq   #5,d3
+    bra.s   .setFPUEnvVar
+.fpuNone:
+    move.l  #"none",(a0)
+    moveq   #4,d3
+    bra.s   .setFPUEnvVar
+.fpuInternal:
+    move.l #"inte",(a0)    ; "internal"
+    moveq  #8,d3
+.setFPUEnvVar:
+    SET_ENV_VAR FPU,#FPUStr,d3
+
+    rts
+
+    section "VariableData",DATA
+
+.cpuDigit:
+    dc.b 0,1,2,2,3,3,4,4,4,6,6,6,8
+    cnop 0,2
+
+    section "Code",CODE
+
+;-----------------------------------------------------------
+; Determines the CPU type and returns it in register D0
+; This function must be called in supervisor mode
+;
 ; Based on code by
-
 ; Chris Hooper: detecting MC680x0 cpus by cleverly
 ; exploiting their CACR and PCR capabilities
 ; https://github.com/cdhooper/amigapci_stm32/blob/main/amiga/cpu_control.c
@@ -495,93 +573,187 @@ setCPUAndFPUEnvVars:
 ; Apollo AC68080 PROGRAMMER'S REFERENCE MANUAL
 ; telling the MC68060 and AC68080 apart by its PCR ID value
 ; http://www.apollo-core.com/documentation/AC68080PRM.pdf
+;
+;-----------------------------------------------------------
+; OUT: D0 - CPU type
+;-----------------------------------------------------------
+; Note: Doesn't preserve any registers
+;-----------------------------------------------------------
 
-    moveq #"0",d4           ; assume 68000
-    btst #0,d5              ; test for 68010+
-    beq.s .storeCPU         ; it's 68000
-    moveq #"1",d4           ; assume 68010
-    btst #1,d5              ; test for 68020+
-    beq.s .storeCPU         ; it's 68010
-    moveq #"2",d4           ; assume 68020
-    move.l #CACRF_IE,d1     ; CACR value to enable 68040+
+.detectCPU:
+    movea.l EXEC_BASE,a0
+
+    ; save Illegal Instruction vector from absolute address
+    move.l  IllegalInstructionVector.w,d6
+    ; install Illegal Instruction trap on absolute address
+    lea     .illegalInstructionTrap(pc),a0
+    move.l  a0,IllegalInstructionVector.w
+
+    moveq   #CPU_68000,d7   ; assume 68000
+    ; execute instruction illegal on MC68000
+    dc.w    $4e7a,$0801     ; movec vbr,d0
+
+    tst.l   d0              ; check for zero VBR
+    beq.s   .zeroVBR
+
+    ; install Illegal Instruction trap on vbr address
+    movea.l d0,a1
+    move.l  IllegalInstructionVector(a1),d5
+    move.l  a0,IllegalInstructionVector.w(a1)
+
+.zeroVBR:
+    moveq   #CPU_68010,d7   ; assume 68010
+    ; execute instruction illegal on MC68010
+    dc.w    $4e7a,$0002     ; movec cacr,d0
+
+    moveq   #CPU_68020,d7   ; assume 68020
+    move.l  #CACRF_IE,d1    ; CACR value to enable 68040+
                             ; instruction cache
-    lea .writeCACR(pc),a5   ; fetch pointer to function
-    jsr _LVOSupervisor(a0)  ; execute function in supervisor
-                            ; mode
-    btst #CACRB_IE,d1       ; test for 68040
-    bne.s .is040
-    move.l #CACRF_ED,d1     ; CACR value to enable 68030
+    jsr     .writeCACR(pc)
+
+    btst    #CACRB_IE,d1    ; test for 68040
+    bne.s   .is040
+
+    ; it's either 68020 or 68030
+    move.l  #CACRF_ED,d1    ; CACR value to enable 68030
                             ; data cache
-    jsr _LVOSupervisor(a0)  ; execute function in
-                            ; supervisor mode
-    btst #CACRB_ED,d1
-    beq.s .storeCPU         ; it's 68020
-    moveq #"3",d4
-    bra.s .storeCPU         ; it's 68030
+    jsr     .writeCACR(pc)
+    btst    #CACRB_ED,d1
+    beq.s   .detectCPU_end  ; it's 68020
+    moveq   #CPU_68030,d7
+    bra.s   .detectCPU_end  ; it's 68030
+
 .is040:
-    moveq #"4",d4           ; assume 68040
-    move.l #CACRF_NAI,d1    ; CACR value to enable 68060
+    moveq   #CPU_68040,d7   ; assume 68040
+    move.l  #CACRF_NAI,d1   ; CACR value to enable 68060
                             ; no allocation mode
-    jsr _LVOSupervisor(a0)  ; execute function in
-                            ; supervisor mode
-    btst #CACRB_NAI,d1
-    beq.s .storeCPU         ; it's 68040
-    moveq #"6",d4           ; assume 68060
-    lea .readPCR(pc),a5     ; fetch pointer to function
-    jsr _LVOSupervisor(a0)  ; execute function in
-                            ; supervisor mode
+    jsr     .writeCACR(pc)
+
+    btst    #CACRB_NAI,d1
+    beq.s   .detectCPU_end  ; it's 68040
+    moveq   #CPU_68060,d7   ; assume 68060
+    dc.w    $4e7a,$1808     ; hex for 'movec.l pcr, d1 ; read pcr
+
     swap d1
-    and.l #$0000FFF0,d1
-    cmp.w #AC68080_ID,d1
-    bne.s .storeCPU         ; it's 68060
-    moveq #"8",d4           ; it's 68080
+    and.l   #$0000FFF0,d1
+    cmp.w   #AC68080_ID,d1
+    bne.s   .detectCPU_end  ; it's 68060
+    moveq   #CPU_68080,d7   ; it's 68080
 
-.storeCPU:
-    move.b  d4,CPUStr+3            ; digit at position 3
-    SET_ENV_VAR_CLEN CPU,#CPUStr,5
+.cleanupCPU
+    ; restore Illegal Instruction vector on absolute address
+    move.l  d6,IllegalInstructionVector.w
+    tst.l   d7
+    beq.s   .detectCPU_end
 
-; Only consider checking FPU if CPU > 68010
-    cmpi.b  #'1',d4 ; Check for 68010
-    bhi .mayHaveFPU    
-    rts
+    ; check if Illegal Instruction vector on VBR address needs to be restored 
+    dc.w    $4e7a,$1801     ; movec vbr,d1
+    tst.l   d1
+    beq.s   .detectCPU_end
 
-.writeCACR:
-    dc.w $4e7a,$0002  ; hex for 'movec.l cacr, d0' ; save cacr
-    dc.w $4e7b,$1002  ; hex for 'movec.l d1, cacr' ; write cacr
-    dc.w $4e7a,$1002  ; hex for 'movec.l cacr, d1' ; read cacr back
-    dc.w $4e7b,$0002  ; hex for 'movec.l d0, cacr' ; restore cacr
+    ; restore Illegal Instruction vector on VBR address
+    move.l  d1,a1
+    move.l  d5,IllegalInstructionVector(a1)
+.detectCPU_end
+    move.l  d7,d0
     rte
 
-.readPCR:
-    dc.w $4e7a,$1808  ; hex for 'movec.l pcr, d1 ; read pcr
+.illegalInstructionTrap:
+    tst.l   d7
+    bne.s   .sixWordFrame
+; 68000 generates 4 word stack frames on exception (Four-Word Stack Frame, Format $0)
+.fourWordFrame
+    addq.l  #$6,sp
+    bra.s   .cleanupCPU
+; 68010+ generate 6 word stack frames on exception (Six-Word Stack Frame, Format $2)
+.sixWordFrame
+    addq.l  #$8,sp
+    bra.s   .cleanupCPU
+
+.writeCACR
+    dc.w    $4e7a,$0002     ; hex for 'movec.l cacr, d0' ; save cacr
+    dc.w    $4e7b,$1002     ; hex for 'movec.l d1, cacr' ; write cacr
+    dc.w    $4e7a,$1002     ; hex for 'movec.l cacr, d1' ; read cacr back
+    dc.w    $4e7b,$0002     ; hex for 'movec.l d0, cacr' ; restore cacr
+    rts
+
+;-----------------------------------------------------------
+; Determines the FPU type and FPU version, returns them in
+; registers D0 and D1
+; This function must be called in supervisor mode
+;
+; Based on information obtained from:
+; 1. MOTOROLA M68000 FAMILY Programmer’s Reference Manual Rev.1
+; 2. M68060 User’s Manual
+; 3. MC68881/882 Floating-point Coprocessor User's Manual Second Edition
+;
+;-----------------------------------------------------------
+; IN:  D1 - CPU type
+; OUT: D0 - FPU type
+;      D1 - FPU version
+;-----------------------------------------------------------
+; Note: Doesn't preserve any registers
+;-----------------------------------------------------------
+.detectFPU:
+    move.l  d1,d7
+
+    cmp.l   #CPU_68060,d7
+    blo.s   .no060
+    ; try enabling fpu on MC68060
+    dc.w    $4e7a,$0808     ; hex for 'movec.l pcr, d0 ; read pcr
+    and.b   #(~PCRF_DPF),d0
+    dc.w    $4e7b,$0808     ; hex for 'movec.l d0, pcr ; write pcr
+
+.no060:
+    ; save Line 1111 Emulator (Unimplemented F-Line Opcode) vector
+    move.l  Line1111EmulatorVector.w,d3
+    lea     .line1111Trap(pc),a0
+    move.l  a0,Line1111EmulatorVector.w
+
+    ; check for any fpu
+    moveq   #FPU_NONE,d0    ; assume no fpu
+    dc.w    $f280,$0000     ; fnop
+
+    moveq   #1,d0           ; assume mc68881
+    dc.w    $f327           ; fsave -(sp)
+    moveq   #0,d1
+    moveq   #0,d2
+    move.b  (sp),d1         ; get fpu version
+    move.b  1(sp),d2        ; get state frame size
+    dc.w    $f35f           ; frestore (sp)+
+    cmpi    #$18,d2         ; MC68881 idle state frame size is $18
+    beq.s   .cleanup
+    cmpi    #$38,d2         ; MC68882 idle state frame size is $38
+    beq.s   .mc68882
+    tst.w   d2              ; MC68040 idle state frame size is $00
+                            ; MC68060 has a different frame format
+    beq.s   .internal
+    moveq   #0,d0           ; assume no fpu
+    beq.s   .cleanup
+
+.internal
+    moveq   #FPU_INT,d0     ; internal 68040/68060/68080 fpu
+    bra.s   .cleanup
+
+.mc68882
+    moveq   #FPU_68882,d0   ; mc68882 fpu
+
+.cleanup
+    ; restore Line 1111 Emulator (Unimplemented F-Line Opcode) vector
+    move.l  d3,Line1111EmulatorVector.w
     rte
 
-.mayHaveFPU:
-; We lshift D0 by 1 (via add.b D5,D5) until it is negative
-    lea    FPUStr,a0
-    add.b  d5,d5
-    bmi.b  .storeInternal
-    add.b  d5,d5
-    bmi.b  .store68882
-    add.b  d5,d5
-    bmi.b  .store68881
-; nothing to store
-    moveq  #0,d3
-    bra.b  .setFPUEnvVar
-.storeInternal:
-    move.l #"inte",(a0)    ; "internal"
-    moveq  #8,d3
-    bra.b  .setFPUEnvVar
-.store68882:
-    move.b #"2",4(a0)
-    moveq  #5,d3
-    bra.b  .setFPUEnvVar
-.store68881:
-    move.b #"1",4(a0)
-    moveq  #5,d3
-.setFPUEnvVar:
-    SET_ENV_VAR FPU,#FPUStr,d3
-    rts
+.line1111Trap:
+    cmp.l   #CPU_68040,d7
+    blo.s   .sixwordframe
+; MC68EC040 and MC68LC040 Floating-Point Unimplemented Stack Frame, Format $4
+.eightwordframe
+    add.l   #$10,sp
+    bra.s   .cleanup
+; all other cpus without fpu generate 6 word stack frames on exception (Six-Word Stack Frame, Format $2)
+.sixwordframe
+    addq.l  #$8,sp
+    bra.s   .cleanup
 
     section "VariableData",DATA
     
