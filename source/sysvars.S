@@ -1,6 +1,6 @@
 ************************************************************
 *                                                          *
-*                      SYSVARS V.0.18                      *
+*                      SYSVARS V.0.19                      *
 *                                                          *
 * SPDX-FileCopyrightText: (c) 2023-2025 Lars Stockmann     *
 * SPDX-License-Identifier: MIT                             *
@@ -13,7 +13,7 @@
 ************************************************************
 
 PROGVER: macro
-    dc.b "$VER: SYSVARS 0.18",0
+    dc.b "$VER: SYSVARS 0.19",0
     endm
 
 ******************** Feature Selection *********************
@@ -744,15 +744,22 @@ setCPUAndFPUEnvVars:
     rte
 
 .line1111Trap:
+    cmp.l   #CPU_68000,d7
+    beq.s   .fourwordframe
     cmp.l   #CPU_68040,d7
     blo.s   .sixwordframe
 ; MC68EC040 and MC68LC040 Floating-Point Unimplemented Stack Frame, Format $4
 .eightwordframe
     add.l   #$10,sp
     bra.s   .cleanup
-; all other cpus without fpu generate 6 word stack frames on exception (Six-Word Stack Frame, Format $2)
+; all other cpus except 68000 without fpu generate 6 word stack frames on exception
+; (Six-Word Stack Frame, Format $2)
 .sixwordframe
     addq.l  #$8,sp
+    bra.s   .cleanup
+; 68000 generates 4 word stack frames on exception (Four-Word Stack Frame, Format $0)
+.fourwordframe
+    addq.l  #$6,sp
     bra.s   .cleanup
 
     section "VariableData",DATA
