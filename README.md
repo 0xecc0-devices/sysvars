@@ -11,7 +11,7 @@ Currently, the following variables are supported:
 |Variable|Availability|Description
 |--------------|------------------------------------------|------------------------------------------
 | **``$CPU``** | always | installed CPU, for example ``68030``
-| **``$FPU``** | if&nbsp;CPU&nbsp;≥&nbsp;68020 | installed FPU, one of ``68881``, ``68882``, ``internal``, or ``none`` for LC/EC 040 and 060 CPUs where no FPU is available
+| **``$FPU``** | always | installed FPU, one of ``68881``, ``68882``, ``internal``, or ``none`` for LC/EC 040 and 060 CPUs where no FPU is available
 | **``$Chipset``** | always | installed graphics chipset, one of ``OCS``, ``ECS``, ``AGA``, ``SAGA``
 | **``$VFreq``** | always | vertical frequency of the native display, can be either ``50`` (PAL 50Hz) or ``60`` (NTSC 60Hz)
 | **``$TotalChipRam``** | always | total amount of Chip RAM installed (in KB)
