@@ -131,7 +131,7 @@ IF NOT WARN
 The tool is already quite useable, but there are still some things missing, which I want to fix in future versions (no particular order):
 
 - Add ``$RTG`` variable to enable/disable stuff like FBlit or swap screen mode configurations
-~~- For Os 1.3: add detection for CPUs > 68020 and at least the 68882~~
+- ~~For Os 1.3: add detection for CPUs > 68020 and at least the 68882~~
 - Make use of boards.library and identify.library if available for even more expansions.
 - Make a WinUAE/FS-UAE-based test suite for automated tests (CI/CD-like)
 
