@@ -10,8 +10,8 @@ Currently, the following variables are supported:
 <a name="overview_table"></a>
 |Variable|Availability|Description
 |--------------|------------------------------------------|------------------------------------------
-| **``$CPU``** | always | installed CPU, for example ``68030`` (68080 is supported, but see [limitations](#Kickstart-13-and-below))
-| **``$FPU``** | if&nbsp;CPU&nbsp;≥&nbsp;68020 | installed FPU, one of ``68881``, ``68882``, ``internal``, or empty for LC/EC 040 and 060 CPUs where no FPU is available (see [limitations](#Kickstart-13-and-below))
+| **``$CPU``** | always | installed CPU, for example ``68030``
+| **``$FPU``** | always | installed FPU, one of ``68881``, ``68882``, ``internal``, or ``none`` for LC/EC 040 and 060 CPUs where no FPU is available
 | **``$Chipset``** | always | installed graphics chipset, one of ``OCS``, ``ECS``, ``AGA``, ``SAGA``
 | **``$VFreq``** | always | vertical frequency of the native display, can be either ``50`` (PAL 50Hz) or ``60`` (NTSC 60Hz)
 | **``$TotalChipRam``** | always | total amount of Chip RAM installed (in KB)
@@ -84,7 +84,6 @@ The tool is also available in the [Aminet](https://aminet.net) and there is a [s
 As sysvars is optimized for speed, being compact and system friendly, it is not an elaborate H/W detection tool, such as WhichAmiga. This means that there might be system combinations, where sysvars gets it wrong. Some known limititaions are listed below. Anyway, you can always file a bug report, if you think that sysvars can be optimized.
 
 ## Kickstart 1.3 and below
-- Sysvars currently detects CPUs above 68020 as 68020 and any FPUs as 68881.
 - Environment variables can only have global scope (i.e., they reside in ENV:). This means you must have ENV: mounted (e.g., to some folder on RAM:). This is not required for OS 2.0 and above.
 - Environment variables can only be used with the IF command (things like
   ``ECHO $CPU`` do not work. You must use ``IF $CPU GE 68010``).
@@ -132,7 +131,7 @@ IF NOT WARN
 The tool is already quite useable, but there are still some things missing, which I want to fix in future versions (no particular order):
 
 - Add ``$RTG`` variable to enable/disable stuff like FBlit or swap screen mode configurations
-- For Os 1.3: add detection for CPUs > 68020 and at least the 68882
+- ~~For Os 1.3: add detection for CPUs > 68020 and at least the 68882~~
 - Make use of boards.library and identify.library if available for even more expansions.
 - Make a WinUAE/FS-UAE-based test suite for automated tests (CI/CD-like)
 
