@@ -1,6 +1,6 @@
 ************************************************************
 *                                                          *
-*                      SYSVARS V.0.19                      *
+*                      SYSVARS V.0.20                      *
 *                                                          *
 * SPDX-FileCopyrightText: (c) 2023-2025 Lars Stockmann     *
 * SPDX-License-Identifier: MIT                             *
@@ -13,7 +13,7 @@
 ************************************************************
 
 PROGVER: macro
-    dc.b "$VER: SYSVARS 0.19",0
+    dc.b "$VER: SYSVARS 0.20",0
     endm
 
 ******************** Feature Selection *********************
@@ -88,6 +88,8 @@ E_\1 = 1
     CHECK_ENABLED BSDSockLibRev
     CHECK_ENABLED BSDSockLib
 
+    CHECK_ENABLED Emu
+
     CHECK_ENABLED UAEMajor
     CHECK_ENABLED UAEMinor
     CHECK_ENABLED UAERev
@@ -144,7 +146,7 @@ AC68080_ID EQU $0440
 
 ; Exec Constants and _LVOs
 
-EXEC_BASE      =  4
+EXEC_BASE      = 4
 EXEC_Node_SIZE = 14
 EXEC_LIB_HDR_S = EXEC_Node_SIZE+20
 EXEC_O_LIB_VER = EXEC_Node_SIZE+6
@@ -349,7 +351,7 @@ OPEN_LIBRARY: macro
         movea.l a6,\3
     endc
 
-    movea.l EXEC_BASE,a6         ; get exec base in A6
+    movea.l EXEC_BASE.w,a6         ; get exec base in A6
     jsr     _LVOOpenLibrary(a6)
     ifnc "\3",""
         movea.l \3,a6
@@ -389,7 +391,7 @@ CLOSE_LIBRARY: macro
             movea.l a6,\2
         endc
 
-    movea.l EXEC_BASE,a6          ; get exec base in A6
+    movea.l EXEC_BASE.w,a6          ; get exec base in A6
     jsr     _LVOCloseLibrary(a6)
     ifnc "\2",""
         movea.l \2,a6
@@ -458,7 +460,7 @@ _LVOSoftVer   = $14
 
     ; On KS < 1.2, we detect that here and fetch the version
     ; via _LVOSoftVer of EXEC.
-    movea.l EXEC_BASE,a0            ; get exec base in A0
+    movea.l EXEC_BASE.w,a0            ; get exec base in A0
     move.w  _LVOSoftVer(a0),d5      ; get KS version
     SET_NUMERIC_ENV_VAR KickVer,d5
     SET_ENV_VAR KickRev
@@ -498,7 +500,7 @@ _LVOSoftVer   = $14
 ;-----------------------------------------------------------
 setCPUAndFPUEnvVars:
 
-    movea.l EXEC_BASE,a0          ; get exec base in A0
+    movea.l EXEC_BASE.w,a0          ; get exec base in A0
 
     lea .detectCPU(pc),a5   ; fetch pointer to function
     jsr _LVOSupervisor(a0)  ; execute function in supervisor
@@ -514,7 +516,7 @@ setCPUAndFPUEnvVars:
     move.b  d0,CPUStr+3     ; digit at position 3
     SET_ENV_VAR_CLEN CPU,#CPUStr,5
 
-    movea.l EXEC_BASE,a0    ; get exec base in A0
+    movea.l EXEC_BASE.w,a0    ; get exec base in A0
     move.l  d7,d1           ; recall cpu model
     lea .detectFPU(pc),a5
     jsr _LVOSupervisor(a0)
@@ -581,7 +583,7 @@ setCPUAndFPUEnvVars:
 ;-----------------------------------------------------------
 
 .detectCPU:
-    movea.l EXEC_BASE,a0
+    movea.l EXEC_BASE.w,a0
 
     ; save Illegal Instruction vector from absolute address
     move.l  IllegalInstructionVector.w,d6
@@ -800,7 +802,7 @@ VAMP_VER_ADDR      = $dff3fc
 
 ; We skip the Vampire detection if no 68080 CPU is present.
 ; Thus, check again AttnFlags...
-    movea.l EXEC_BASE,a0          ; get exec base in A0
+    movea.l EXEC_BASE.w,a0          ; get exec base in A0
     move.w  _LVOAttnFlags(a0),d5  ; get cpu info in D5
     btst    #10,d5
     bne.b   .haveVampire
@@ -1004,7 +1006,7 @@ mh_Attributes = $0e
 mh_Lower      = $14
 mh_Upper      = $18
 
-    movea.l EXEC_BASE,a0
+    movea.l EXEC_BASE.w,a0
     move.l _LVOMemList(a0),d0  ; get memory list
 
 ; initialize registers
@@ -1195,23 +1197,30 @@ BSDSockLibName: dc.b "bsdsocket.library",0
 ; Potentially overwrites all registers, except A6
 ;-----------------------------------------------------------
 setUAEEnvVars:
-
+_LVOFindConfigDev EQU -72
+_LVOOpenResource EQU -498
 _LVOResourceList = $150
 _LVOFindName     = -276
+musashi_mid equ $7db
+musashi_interaction_pid equ $6b
+
+    movea.l a6,a4
+    movea.l EXEC_BASE.w,a6
+
+; try to open UAE's uae.resource
+    moveq #0,d0
+    lea UaeResName,a1
+    jsr _LVOOpenResource(a6)
+    tst.l d0
+    beq.w .notUAE
 
 ; UAE structure embeds a library structure, after that it
 ; holds three words: major,; minor and revision
-
-    movea.l a6,a4 ; preserve A6 (needed for SysBase)   
-    movea.l EXEC_BASE,a6             ; get exec base in A6
+.readUAEVersions:
     lea     _LVOResourceList(a6),a0  ; arg1 resource list
     lea     UaeResName,a1            ; arg2 resource name
     jsr     _LVOFindName(a6)         ; call FindName
-    movea.l a4,a6 ; restore A6
-
-; Test whether UAE was detected
-    tst.l d0
-    beq   .notFound
+    movea.l a4,a6                    ; restore A6
 
 ; Store version as string in UAEEnvVarCont    
     move.l  d0,a3               ; addr. of UAE struct in A2
@@ -1226,18 +1235,67 @@ _LVOFindName     = -276
     moveq  #0,d0
     move.w (a3)+,d0
     SET_NUMERIC_ENV_VAR UAERev,d0
-    rts
+    SET_ENV_VAR_CLEN Emu,#UAEStr,3
+    bra.w .exit
 
-.notFound:
+.notUAE:
     DELETE_ENV_VAR UAEMajor
     DELETE_ENV_VAR UAEMinor
     DELETE_ENV_VAR UAERev
+
+; try to open Emu68's devicetree.resource
+    lea Emu68ResName,a1
+    jsr _LVOOpenResource(a6)
+    tst.l d0
+    beq.s .notEmu68
+
+    SET_ENV_VAR_CLEN Emu,#Emu68Str,5
+    bra.s .restoreA6
+
+.notEmu68:
+; try to find Musashi's interaction device
+    moveq #0,d0
+    lea.l expansionName,a1
+    jsr _LVOOpenLibrary(a6)
+    tst.l d0
+    ; quit if expansion.library couldn't be opened
+    beq.s .restoreA6
+
+    movea.l d0,a6
+	move.l #musashi_mid,d0
+	moveq #musashi_interaction_pid,d1
+    jsr _LVOFindConfigDev(a6)
+    tst.l d0
+    beq.s .restoreA6
+
+    SET_ENV_VAR_CLEN Emu,#MusashiStr,7
+
+.restoreA6:
+    movea.l a4,a6
+.exit
     rts
 
     section "Strings",CODE
+expansionName:
+    dc.b "expansion.library",0
+    cnop 0,2
+UaeResName:
+    dc.b "uae.resource",0
+    cnop 0,2
+Emu68ResName:
+    dc.b "devicetree.resource",0
+    cnop 0,2
+UAEStr:
+    dc.b "UAE"
+    cnop 0,2
+MusashiStr:
+    dc.b "Musashi"
+    cnop 0,2
+Emu68Str:
+    dc.b "Emu68"
+    cnop 0,2
 
-UaeResName: dc.b "uae.resource",0
-
+    DEFINE_ENV_VAR Emu
     DEFINE_ENV_VAR UAEMajor
     DEFINE_ENV_VAR UAEMinor
     DEFINE_ENV_VAR UAERev
