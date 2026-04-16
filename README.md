@@ -21,6 +21,7 @@ Currently, the following variables are supported:
 | **``$SlowRamFirst``** | see&nbsp;description | The variable is set to ``1`` if Slow RAM is first to be allocated as non-Chip RAM[^2], otherwise this variable is unavailable
 | **``$KickVer``** & **``$KickRev``** | always | Kickstart version and revision (see [limitations](#Kickstart-12-and-below))
 | **``$BSDSockLib``**, **``$BSDSockLibVer``**, **``$BSDSockLibRev``** | if&nbsp;present | ID, version and revision of bsdsocket.library
+| **``$Emu``**| if&nbsp;detected | emulation, one of ``UAE``, ``Musashi``, ``Emu68``
 | **``$UAEMajor``**, **``$UAEMinor``**, **``$UAERev``** | if&nbsp;detected | major, minor version and revision of UAE detected (see [limitations](#UAE-detection))
 | **``$VampireType``** | if&nbsp;CPU&nbsp;=&nbsp;68080 | type of vampire installed, for example "V2_600", or "V4_Standalone"
 | **``$VampireCoreRev``** | if&nbsp;CPU&nbsp;=&nbsp;68080 | core revision of the currently flashed firmware .jic file[^3]
