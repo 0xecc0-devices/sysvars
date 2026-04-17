@@ -1,6 +1,6 @@
 ************************************************************
 *                                                          *
-*                      SYSVARS V.0.20                      *
+*                      SYSVARS V.0.21                      *
 *                                                          *
 * SPDX-FileCopyrightText: (c) 2023-2025 Lars Stockmann     *
 * SPDX-License-Identifier: MIT                             *
@@ -13,7 +13,7 @@
 ************************************************************
 
 PROGVER: macro
-    dc.b "$VER: SYSVARS 0.20",0
+    dc.b "$VER: SYSVARS 0.21",0
     endm
 
 ******************** Feature Selection *********************
@@ -1266,9 +1266,14 @@ musashi_interaction_pid equ $6b
 	moveq #musashi_interaction_pid,d1
     jsr _LVOFindConfigDev(a6)
     tst.l d0
-    beq.s .restoreA6
+    beq.s .closeExpansion
 
     SET_ENV_VAR_CLEN Emu,#MusashiStr,7
+
+.closeExpansion:
+    movea.l a6,a1
+    movea.l EXEC_BASE.w,a6
+    jsr _LVOCloseLibrary(a6)
 
 .restoreA6:
     movea.l a4,a6
