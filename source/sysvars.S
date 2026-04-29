@@ -1,6 +1,6 @@
 ************************************************************
 *                                                          *
-*                      SYSVARS V.0.23                      *
+*                      SYSVARS V.0.19                      *
 *                                                          *
 * SPDX-FileCopyrightText: (c) 2023-2025 Lars Stockmann     *
 * SPDX-License-Identifier: MIT                             *
@@ -13,7 +13,7 @@
 ************************************************************
 
 PROGVER: macro
-    dc.b "$VER: SYSVARS 0.23",0
+    dc.b "$VER: SYSVARS 0.19",0
     endm
 
 ******************** Feature Selection *********************
@@ -111,17 +111,11 @@ Line1111EmulatorVector      EQU $2c
 
 CPU_68000   EQU 0
 CPU_68010   EQU 1
-CPU_68EC020 EQU 2
-CPU_68020   EQU 3
-CPU_68EC030 EQU 4
-CPU_68030   EQU 5
-CPU_68EC040 EQU 6
-CPU_68LC040 EQU 7
-CPU_68040   EQU 8
-CPU_68EC060 EQU 9
-CPU_68LC060 EQU 10
-CPU_68060   EQU 11
-CPU_68080   EQU 12
+CPU_68020   EQU 2
+CPU_68030   EQU 3
+CPU_68040   EQU 4
+CPU_68060   EQU 6
+CPU_68080   EQU 8
 
 FPU_NONE    EQU 0
 FPU_68881   EQU 1
@@ -141,10 +135,6 @@ PCRF_DPF EQU 1<<1
 CACRB_ED EQU 8
 CACRF_ED EQU 1<<8
 
-; cache control no allocate mode (68060)
-CACRB_NAI EQU 14
-CACRF_NAI EQU 1<<14
-
 ; cache control instruction cache enable (68040+)
 CACRB_IE EQU 15
 CACRF_IE EQU 1<<15
@@ -152,12 +142,7 @@ CACRF_IE EQU 1<<15
 AC68080_ID EQU $0440
 MC68060_ID EQU $0430
 
-; constants for detection of 24bit addressing
-KICK_VER equ $00F8000C
-KICK_VER_WRAP equ 1<<24
-
 ; Exec Constants and _LVOs
-
 EXEC_BASE      = 4
 EXEC_Node_SIZE = 14
 EXEC_LIB_HDR_S = EXEC_Node_SIZE+20
@@ -170,15 +155,13 @@ _LVOCloseLibrary = -414
 _LVOOpenResource = -498
 _LVOOpenLibrary  = -552
 
+_LVOAttnFlags = $128
 _LVOResourceList = $150
 
 ; expansion.library
 _LVOFindConfigDev = -72
-musashi_mid equ $7db
-musashi_interaction_pid equ $6b
-
-
-_LVOAttnFlags = $128
+musashi_mid EQU $7db
+musashi_interaction_pid EQU $6b
 
 ; Dos _LVOs
 
@@ -191,6 +174,16 @@ GVF_LOCAL_ONLY = $200
 
 ************************* Macros  **************************
 
+
+;-----------------------------------------------------------
+; get's exec.library base address to passed address register
+;-----------------------------------------------------------
+; Macro Arguments:
+; 1: address register to store the exec.library address in
+;-----------------------------------------------------------
+EXECBASE macro
+	movea.l EXEC_BASE.w,\1
+  endm
 
 ;-----------------------------------------------------------
 ; Uses the sysvars naming scheme to generate environment
@@ -374,7 +367,7 @@ OPEN_LIBRARY: macro
         movea.l a6,\3
     endc
 
-    movea.l EXEC_BASE.w,a6         ; get exec base in A6
+    EXECBASE a6         ; get exec base in A6
     jsr     _LVOOpenLibrary(a6)
     ifnc "\3",""
         movea.l \3,a6
@@ -414,7 +407,7 @@ CLOSE_LIBRARY: macro
             movea.l a6,\2
         endc
 
-    movea.l EXEC_BASE.w,a6          ; get exec base in A6
+    EXECBASE a6         ; get exec base in A6
     jsr     _LVOCloseLibrary(a6)
     ifnc "\2",""
         movea.l \2,a6
@@ -483,7 +476,7 @@ _LVOSoftVer   = $14
 
     ; On KS < 1.2, we detect that here and fetch the version
     ; via _LVOSoftVer of EXEC.
-    movea.l EXEC_BASE.w,a0            ; get exec base in A0
+    EXECBASE a6                     ; get exec base in A6
     move.w  _LVOSoftVer(a0),d5      ; get KS version
     SET_NUMERIC_ENV_VAR KickVer,d5
     SET_ENV_VAR KickRev
@@ -523,15 +516,20 @@ _LVOSoftVer   = $14
 ;-----------------------------------------------------------
 setCPUAndFPUEnvVars:
     ; detect CPU
-    movea.l EXEC_BASE.w,a0  ; get exec base in A0
+    EXECBASE a0             ; get exec base in A0
     lea .detectCPU(pc),a5   ; fetch pointer to function
     jsr _LVOSupervisor(a0)  ; execute function in supervisor
                             ; mode
-    lea .cpuType,a3
-    move.b d7,(a3)
+
+    move.l  d7,d0
+    add.l   #$30,d0         ; convert to ascii
+    lea     CPUStr,a0
+    move.b  d0,3(a0)
+    ; set cpu environment variable
+    SET_ENV_VAR CPU,#CPUStr
 
     ; detect FPU
-    movea.l EXEC_BASE.w,a0  ; get exec base in A0
+    EXECBASE a0             ; get exec base in A0
     move.l  d7,d1           ; recall cpu model
     lea .detectFPU(pc),a5
     jsr _LVOSupervisor(a0)
@@ -549,60 +547,24 @@ setCPUAndFPUEnvVars:
 .fpu68882:
 .fpu68881:
     move.b  d0,4(a0)
-    moveq   #5,d3
+    ; zero terminate the string
+    move.b  #0,5(a0)
     bra.s   .setFPUEnvVar
 .fpuNone:
-    ; 68040 without FPU are LC/EC variants
-    cmp.b   #CPU_68040,(a3)
-    bne.s   .noCPUModelAdjust
-    move.b  #CPU_68LC040,(a3)
-.noCPUModelAdjust
-    move.l  #"none",(a0)
-    moveq   #4,d3
-    bra.s   .setFPUEnvVar
+    DELETE_ENV_VAR FPU
+    bra.s   .end
 .fpuInternal:
     move.l #"inte",(a0)    ; "internal"
-    moveq  #8,d3
 .setFPUEnvVar:
-    SET_ENV_VAR FPU,#FPUStr,d3
+    SET_ENV_VAR FPU,#FPUStr
 
-.writeCPUString:
-    moveq   #0,d7
-    move.b  (a3),d7
-    move.l  d7,d0
-    mulu.w  #.cpuNameLength,d0
-    lea     .cpuName,a0
-    adda.l  d0,a0
-    SET_ENV_VAR CPU,a0
-
+    ; set CPU revision for MC68060/AC68080
     cmp.b #CPU_68040,d7
     ble.s .end
-    ; set CPU revision for MC68060/AC68080
     SET_NUMERIC_ENV_VAR CPURev,d6
 
 .end
     rts
-
-    section "VariableData",DATA
-.cpuType:
-    dc.b 0
-    cnop 0,2
-.cpuNameLength EQU 8
-.cpuName:
-    dc.b "68000",0,0,0
-    dc.b "68010",0,0,0
-    dc.b "68EC020",0
-    dc.b "68020",0,0,0
-    dc.b "68EC030",0
-    dc.b "68030",0,0,0
-    dc.b "68EC040",0
-    dc.b "68LC040",0
-    dc.b "68040",0,0,0
-    dc.b "68EC060",0
-    dc.b "68LC060",0
-    dc.b "68060",0,0,0
-    dc.b "68080",0
-    cnop 0,2
 
     section "Code",CODE
 
@@ -636,7 +598,7 @@ setCPUAndFPUEnvVars:
 ;-----------------------------------------------------------
 
 .detectCPU:
-    movea.l EXEC_BASE.w,a0
+    EXECBASE a0             ; get exec base in A0
 
     ; save Illegal Instruction vector from absolute address
     move.l  IllegalInstructionVector.w,d6
@@ -674,24 +636,10 @@ setCPUAndFPUEnvVars:
                             ; data cache
     jsr     .writeCACR(pc)
     btst    #CACRB_ED,d1
-    bne.s   .is030          ; it's 68030
-	; it's 68020 or 68ec020
-	; get kickstart version
-	movea.l #KICK_VER,a3
-	; and from same address with bit 24 set
-	; which wraps around on MC68EC020
-	movea.l #KICK_VER_WRAP,a4
-	add.l a3,a4
-	move.l (a3),d3
-	move.l (a4),d4
-	; compare kickstart versions
-	cmp.l d3,d4
-	bne.s .detectCPU_end
-	moveq #CPU_68EC020,d7
-    bra.s .detectCPU_end
-.is030:
-    moveq   #CPU_68030,d7
-    bra.s   .detectCPU_end  ; it's 68030
+    beq.s   .detectCPU_end  ; it's 68020
+
+	moveq   #CPU_68030,d7   ; it's 68030
+    bra.s   .detectCPU_end
 
 .is040:
     moveq   #CPU_68040,d7   ; assume 68040
@@ -707,11 +655,7 @@ setCPUAndFPUEnvVars:
     swap    d1
     cmp.w   #AC68080_ID,d1
     beq.s   .detectCPU_end  ; it's 68080
-    moveq   #CPU_68060,d7   ; assume 68060
-    andi.l  #$0000000F,d1
-    tst.l   d1
-    beq.s   .detectCPU_end
-    moveq   #CPU_68LC060,d7   ; it's 68LC060 or 68EC060
+    moveq   #CPU_68060,d7   ; it's 68060
     bra.s   .detectCPU_end
 
 .cleanupCPU
@@ -837,12 +781,14 @@ setCPUAndFPUEnvVars:
 
     section "VariableData",DATA
     
-CPUStr: dc.b "680?0"
+CPUStr:
+    dc.b "680?0",0
 
 ; The string for the FPU is composed using a long  move.
 ; Thus the target string must be aligned accordingly.
     cnop 0,4
-FPUStr: dc.b "6888rnal"
+FPUStr:
+    dc.b "6888rnal",0
     
     section "Strings",CODE
 
@@ -874,8 +820,8 @@ VAMP_VER_ADDR      = $dff3fc
 
 ; We skip the Vampire detection if no 68080 CPU is present.
 ; Thus, check again AttnFlags...
-    movea.l EXEC_BASE.w,a0          ; get exec base in A0
-    move.w  _LVOAttnFlags(a0),d5  ; get cpu info in D5
+    EXECBASE a0                     ; get exec base in A0
+    move.w  _LVOAttnFlags(a0),d5    ; get cpu info in D5
     btst    #10,d5
     bne.b   .haveVampire
 
@@ -1078,8 +1024,8 @@ mh_Attributes = $0e
 mh_Lower      = $14
 mh_Upper      = $18
 
-    movea.l EXEC_BASE.w,a0
-    move.l _LVOMemList(a0),d0  ; get memory list
+    EXECBASE a0                 ; get exec base in A0
+    move.l _LVOMemList(a0),d0   ; get memory list
 
 ; initialize registers
 ; Note: D0 - D3 are potentially overwritten by SET_ENV_VAR
@@ -1272,7 +1218,7 @@ setUAEEnvVars:
     ; save dos.library pointer
     movea.l a6,a4
     ; get exec.library
-    movea.l EXEC_BASE.w,a6
+    EXECBASE a6
 
     ; assume no emulation
     moveq #EMU_NONE,d7
@@ -1339,7 +1285,7 @@ setUAEEnvVars:
 .closeExpansion:
     ; get expansion.library pointer
     movea.l a6,a1
-    movea.l EXEC_BASE.w,a6
+    EXECBASE a6
     jsr _LVOCloseLibrary(a6)
 
 .writeEmuEnvVars
