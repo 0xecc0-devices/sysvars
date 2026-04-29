@@ -11,7 +11,8 @@ Currently, the following variables are supported:
 |Variable|Availability|Description
 |--------------|------------------------------------------|------------------------------------------
 | **``$CPU``** | always | installed CPU, for example ``68030``
-| **``$FPU``** | always | installed FPU, one of ``68881``, ``68882``, ``internal``, or ``none`` for LC/EC 040 and 060 CPUs where no FPU is available
+| **``$FPU``** | if&nbsp;present | installed FPU, one of ``68881``, ``68882`` or ``internal``
+| **``$CPURev``** | if&nbsp;available | Revision of installed CPU for MC68060/MC68LC060/MC68EC060 and AC68080, for example ``6``
 | **``$Chipset``** | always | installed graphics chipset, one of ``OCS``, ``ECS``, ``AGA``, ``SAGA``
 | **``$VFreq``** | always | vertical frequency of the native display, can be either ``50`` (PAL 50Hz) or ``60`` (NTSC 60Hz)
 | **``$TotalChipRam``** | always | total amount of Chip RAM installed (in KB)
@@ -21,7 +22,7 @@ Currently, the following variables are supported:
 | **``$SlowRamFirst``** | see&nbsp;description | The variable is set to ``1`` if Slow RAM is first to be allocated as non-Chip RAM[^2], otherwise this variable is unavailable
 | **``$KickVer``** & **``$KickRev``** | always | Kickstart version and revision (see [limitations](#Kickstart-12-and-below))
 | **``$BSDSockLib``**, **``$BSDSockLibVer``**, **``$BSDSockLibRev``** | if&nbsp;present | ID, version and revision of bsdsocket.library
-| **``$Emu``**| if&nbsp;detected | emulation, one of ``UAE``, ``Musashi``, ``Emu68``
+| **``$Emulation``**| if&nbsp;present | emulation, one of ``UAE``, ``Musashi``, ``Emu68``
 | **``$UAEMajor``**, **``$UAEMinor``**, **``$UAERev``** | if&nbsp;detected | major, minor version and revision of UAE detected (see [limitations](#UAE-detection))
 | **``$VampireType``** | if&nbsp;CPU&nbsp;=&nbsp;68080 | type of vampire installed, for example "V2_600", or "V4_Standalone"
 | **``$VampireCoreRev``** | if&nbsp;CPU&nbsp;=&nbsp;68080 | core revision of the currently flashed firmware .jic file[^3]
